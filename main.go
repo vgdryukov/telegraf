@@ -14,14 +14,16 @@ import (
 )
 
 func getConfig() (string, string, string) {
-	port := os.Getenv("PORT")
-	if port == "" {
-		port = "8080"
+	// PORT используется Render для health checks - это должен быть HTTP порт
+	httpPort := os.Getenv("PORT")
+	if httpPort == "" {
+		httpPort = "8081"
 	}
 
-	httpPort := os.Getenv("HTTP_PORT")
-	if httpPort == "" {
-		httpPort = "8081" // Отдельный порт для HTTP health checks
+	// TCP порт для вашего приложения
+	tcpPort := os.Getenv("TCP_PORT")
+	if tcpPort == "" {
+		tcpPort = "10000"
 	}
 
 	environment := os.Getenv("ENVIRONMENT")
@@ -29,7 +31,7 @@ func getConfig() (string, string, string) {
 		environment = "production"
 	}
 
-	return port, httpPort, environment
+	return tcpPort, httpPort, environment
 }
 
 // startHealthCheckServer запускает HTTP сервер для health checks от Render
@@ -38,7 +40,6 @@ func startHealthCheckServer(port string) *http.Server {
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == "HEAD" || r.Method == "GET" {
 			w.WriteHeader(http.StatusOK)
-			w.Write([]byte("OK"))
 			return
 		}
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -69,21 +70,21 @@ func startHealthCheckServer(port string) *http.Server {
 }
 
 func main() {
-	port, httpPort, environment := getConfig()
+	tcpPort, httpPort, environment := getConfig()
 
 	fmt.Printf("🚀 Starting P2P Messenger Server...\n")
 	fmt.Printf("📍 Environment: %s\n", environment)
-	fmt.Printf("🔌 TCP Port: %s\n", port)
+	fmt.Printf("🔌 TCP Port: %s\n", tcpPort)
 	fmt.Printf("🌐 HTTP Port: %s\n", httpPort)
 
-	host := "0.0.0.0" // Всегда слушаем все интерфейсы в production
+	host := "0.0.0.0"
 	if environment == "development" {
 		host = "localhost"
 	}
 
 	serverConfig := server.ServerConfig{
 		Host: host,
-		Port: port,
+		Port: tcpPort, // Используем TCP порт из переменной
 	}
 
 	storageConfig := server.StorageConfig{
@@ -98,15 +99,15 @@ func main() {
 	// Запускаем HTTP сервер для health checks
 	healthServer := startHealthCheckServer(httpPort)
 
-	log.Printf("✅ Server configured - Host: %s, TCP Port: %s, HTTP Port: %s", host, port, httpPort)
+	log.Printf("✅ Server configured - Host: %s, TCP Port: %s, HTTP Port: %s", host, tcpPort, httpPort)
 
 	// Создаем контекст для graceful shutdown
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	// Запускаем основной TCP сервер
+	// Запускаем основной TCP сервер - передаем оба аргумента
 	go func() {
-		if err := messengerServer.Start(ctx); err != nil {
+		if err := messengerServer.Start(ctx, httpPort); err != nil {
 			log.Printf("❌ TCP server error: %v", err)
 		}
 	}()
@@ -126,7 +127,5 @@ func main() {
 		log.Println("✅ HTTP server stopped gracefully")
 	}
 
-	// Даем время на завершение TCP соединений
-	time.Sleep(2 * time.Second)
 	log.Println("👋 Server stopped")
 }

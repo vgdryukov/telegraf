@@ -9,6 +9,6 @@ services:
       - key: ENVIRONMENT
         value: production
       - key: PORT
-        generateValue: true
-      - key: HTTP_PORT
-        value: "8081"
+        value: "8081"  # HTTP порт для health checks
+      - key: TCP_PORT  
+        value: "10000" # TCP порт для вашего приложения
