@@ -10,6 +10,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"strings"
 	"sync"
 	"telegraf/shared"
 	"time"
@@ -253,6 +254,13 @@ func (ms *MessengerServer) handleTCPConnection(conn net.Conn) {
 
 		log.Printf("📨 TCP Raw data from %s: %s", remoteAddr, string(data))
 
+		// Проверяем, является ли запрос HTTP health check
+		if ms.isHTTPRequest(data) {
+			log.Printf("🌐 TCP HTTP Health Check from %s", remoteAddr)
+			ms.handleTCPHTTPResponse(conn)
+			continue
+		}
+
 		var request shared.Request
 		if err := json.Unmarshal(data, &request); err != nil {
 			log.Printf("❌ TCP JSON error from %s: %v", remoteAddr, err)
@@ -268,6 +276,32 @@ func (ms *MessengerServer) handleTCPConnection(conn net.Conn) {
 		// Обновляем таймауты
 		conn.SetReadDeadline(time.Now().Add(30 * time.Second))
 		conn.SetWriteDeadline(time.Now().Add(30 * time.Second))
+	}
+}
+
+// Проверяем, является ли запрос HTTP health check
+func (ms *MessengerServer) isHTTPRequest(data []byte) bool {
+	str := string(data)
+	return strings.HasPrefix(str, "HEAD ") ||
+		strings.HasPrefix(str, "GET ") ||
+		strings.HasPrefix(str, "POST ") ||
+		strings.HasPrefix(str, "Host:") ||
+		strings.HasPrefix(str, "User-Agent:")
+}
+
+// Обработка HTTP health check через TCP
+func (ms *MessengerServer) handleTCPHTTPResponse(conn net.Conn) {
+	response := "HTTP/1.1 200 OK\r\n" +
+		"Content-Type: text/plain\r\n" +
+		"Content-Length: 2\r\n" +
+		"Connection: close\r\n" +
+		"\r\n" +
+		"OK"
+
+	if _, err := conn.Write([]byte(response)); err != nil {
+		log.Printf("❌ TCP HTTP Response error: %v", err)
+	} else {
+		log.Printf("📤 TCP HTTP Response sent: 200 OK")
 	}
 }
 
