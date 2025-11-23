@@ -3,8 +3,8 @@ services:
     name: telegraf
     env: go
     plan: free
-    buildCommand: go build -o server .
-    startCommand: ./server
+    buildCommand: mkdir -p bin && go build -o bin/telegraf
+    startCommand: ./bin/telegraf
     envVars:
       - key: ENVIRONMENT
         value: production
