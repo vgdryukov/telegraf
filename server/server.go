@@ -39,6 +39,11 @@ func (ms *MessengerServer) Start(ctx context.Context, httpPort string) error {
 	tcpAddress := fmt.Sprintf("%s:%s", ms.config.Host, ms.config.Port)
 	httpAddress := fmt.Sprintf("%s:%s", ms.config.Host, httpPort)
 
+	log.Printf("🚀 P2P Messenger Server starting...")
+	log.Printf("📍 Host: %s", ms.config.Host)
+	log.Printf("🔌 TCP Server: %s", tcpAddress)
+	log.Printf("🌐 HTTP Server: http://%s", httpAddress)
+
 	// Запускаем HTTP сервер для веб-клиента в отдельной горутине
 	go ms.startHTTPServer(httpAddress)
 
@@ -49,20 +54,42 @@ func (ms *MessengerServer) Start(ctx context.Context, httpPort string) error {
 	}
 	defer listener.Close()
 
-	log.Printf("🚀 P2P Messenger Server started")
-	log.Printf("📍 Host: %s", ms.config.Host)
-	log.Printf("🔌 TCP Server: %s", tcpAddress)
-	log.Printf("🌐 HTTP Server: http://%s", httpAddress)
+	// Канал для graceful shutdown
+	serverCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
 
-	// Простой цикл принятия соединений
+	// Запускаем обработку TCP соединений в отдельной горутине
+	go ms.acceptTCPConnections(serverCtx, listener)
+
+	// Ожидаем сигнал завершения
+	<-serverCtx.Done()
+	log.Println("🛑 Server shutting down...")
+
+	// Закрываем все активные соединения
+	ms.closeAllConnections()
+
+	return nil
+}
+
+// Обработка TCP соединений
+func (ms *MessengerServer) acceptTCPConnections(ctx context.Context, listener net.Listener) {
 	for {
 		select {
 		case <-ctx.Done():
-			log.Println("🛑 Server shutting down...")
-			return nil
+			return
 		default:
+			// Устанавливаем таймаут для Accept чтобы можно было проверить контекст
+			listener.(*net.TCPListener).SetDeadline(time.Now().Add(1 * time.Second))
 			conn, err := listener.Accept()
 			if err != nil {
+				if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
+					// Таймаут - проверяем контекст и продолжаем
+					continue
+				}
+				if ctx.Err() != nil {
+					// Контекст отменен - выходим
+					return
+				}
 				log.Printf("❌ TCP Accept error: %v", err)
 				continue
 			}
@@ -71,11 +98,24 @@ func (ms *MessengerServer) Start(ctx context.Context, httpPort string) error {
 	}
 }
 
+// Закрытие всех активных соединений
+func (ms *MessengerServer) closeAllConnections() {
+	ms.mutex.Lock()
+	defer ms.mutex.Unlock()
+
+	for username, conn := range ms.onlineUsers {
+		conn.Close()
+		log.Printf("🔌 Closed connection for user: %s", username)
+	}
+	ms.onlineUsers = make(map[string]net.Conn)
+}
+
 // HTTP сервер
 func (ms *MessengerServer) startHTTPServer(address string) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", ms.handleHTTPRoot)
 	mux.HandleFunc("/api", ms.handleHTTPApi)
+	mux.HandleFunc("/health", ms.handleHealthCheck)
 
 	server := &http.Server{
 		Addr:    address,
@@ -86,6 +126,18 @@ func (ms *MessengerServer) startHTTPServer(address string) {
 	if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		log.Printf("❌ HTTP server error: %v", err)
 	}
+}
+
+// Health check для Render
+func (ms *MessengerServer) handleHealthCheck(w http.ResponseWriter, r *http.Request) {
+	ms.setCORSHeaders(w)
+
+	if r.Method == "HEAD" || r.Method == "GET" {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("OK"))
+		return
+	}
+	http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 }
 
 // Обработчик корневого пути HTTP
