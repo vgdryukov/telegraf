@@ -7,34 +7,17 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"strconv"
 	"syscall"
 	"time"
 
 	"telegraf/server"
 )
 
-func getConfig() (string, string, string) {
+func getConfig() (string, string) {
 	// PORT используется Render для health checks
-	httpPort := os.Getenv("PORT")
-	if httpPort == "" {
-		httpPort = "8080"
-	}
-
-	// TCP порт для вашего приложения - используем другой порт
-	tcpPort := os.Getenv("TCP_PORT")
-	if tcpPort == "" {
-		// Если HTTP порт 8080, используем 10000, иначе используем порт + 1
-		if httpPort == "8080" {
-			tcpPort = "10000"
-		} else {
-			// Конвертируем HTTP порт в число и добавляем 1
-			if portNum, err := strconv.Atoi(httpPort); err == nil {
-				tcpPort = strconv.Itoa(portNum + 1)
-			} else {
-				tcpPort = "10000"
-			}
-		}
+	port := os.Getenv("PORT")
+	if port == "" {
+		port = "8080"
 	}
 
 	environment := os.Getenv("ENVIRONMENT")
@@ -42,7 +25,7 @@ func getConfig() (string, string, string) {
 		environment = "production"
 	}
 
-	return tcpPort, httpPort, environment
+	return port, environment
 }
 
 // startHealthCheckServer запускает HTTP сервер для health checks от Render
@@ -82,17 +65,11 @@ func startHealthCheckServer(port string) *http.Server {
 }
 
 func main() {
-	tcpPort, httpPort, environment := getConfig()
+	port, environment := getConfig()
 
 	fmt.Printf("🚀 Starting P2P Messenger Server...\n")
 	fmt.Printf("📍 Environment: %s\n", environment)
-	fmt.Printf("🔌 TCP Port: %s\n", tcpPort)
-	fmt.Printf("🌐 HTTP Port: %s\n", httpPort)
-
-	// Проверяем, что порты разные
-	if tcpPort == httpPort {
-		log.Fatalf("❌ Port conflict: TCP port %s cannot be the same as HTTP port", tcpPort)
-	}
+	fmt.Printf("🌐 Port: %s\n", port)
 
 	host := "0.0.0.0"
 	if environment == "development" {
@@ -101,7 +78,7 @@ func main() {
 
 	serverConfig := server.ServerConfig{
 		Host: host,
-		Port: tcpPort,
+		Port: port, // Используем тот же порт для TCP сервера
 	}
 
 	storageConfig := server.StorageConfig{
@@ -114,9 +91,9 @@ func main() {
 	messengerServer := server.NewMessengerServer(serverConfig, storageConfig)
 
 	// Запускаем HTTP сервер для health checks
-	healthServer := startHealthCheckServer(httpPort)
+	healthServer := startHealthCheckServer(port)
 
-	log.Printf("✅ Server configured - Host: %s, TCP Port: %s, HTTP Port: %s", host, tcpPort, httpPort)
+	log.Printf("✅ Server configured - Host: %s, Port: %s", host, port)
 
 	// Создаем контекст для graceful shutdown
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -124,7 +101,7 @@ func main() {
 
 	// Запускаем основной TCP сервер
 	go func() {
-		if err := messengerServer.Start(ctx, httpPort); err != nil {
+		if err := messengerServer.Start(ctx, port); err != nil {
 			log.Printf("❌ TCP server error: %v", err)
 		}
 	}()
