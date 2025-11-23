@@ -3,7 +3,7 @@ services:
     name: telegraf
     env: go
     plan: free
-    buildCommand: go build -o server main.go
+    buildCommand: go build -o server .
     startCommand: ./server
     envVars:
       - key: ENVIRONMENT
