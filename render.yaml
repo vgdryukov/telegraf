@@ -8,7 +8,3 @@ services:
     envVars:
       - key: ENVIRONMENT
         value: production
-      - key: PORT
-        generateValue: true  # Render сам назначит порт для HTTP
-      - key: TCP_PORT
-        value: "10000"      # Фиксированный порт для TCP

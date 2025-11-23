@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
 	"time"
 
@@ -14,16 +15,26 @@ import (
 )
 
 func getConfig() (string, string, string) {
-	// PORT используется Render для health checks - это должен быть HTTP порт
+	// PORT используется Render для health checks
 	httpPort := os.Getenv("PORT")
 	if httpPort == "" {
-		httpPort = "8080" // Render автоматически назначает порт
+		httpPort = "8080"
 	}
 
-	// TCP порт для вашего приложения
+	// TCP порт для вашего приложения - используем другой порт
 	tcpPort := os.Getenv("TCP_PORT")
 	if tcpPort == "" {
-		tcpPort = "10000"
+		// Если HTTP порт 8080, используем 10000, иначе используем порт + 1
+		if httpPort == "8080" {
+			tcpPort = "10000"
+		} else {
+			// Конвертируем HTTP порт в число и добавляем 1
+			if portNum, err := strconv.Atoi(httpPort); err == nil {
+				tcpPort = strconv.Itoa(portNum + 1)
+			} else {
+				tcpPort = "10000"
+			}
+		}
 	}
 
 	environment := os.Getenv("ENVIRONMENT")
@@ -78,6 +89,11 @@ func main() {
 	fmt.Printf("🔌 TCP Port: %s\n", tcpPort)
 	fmt.Printf("🌐 HTTP Port: %s\n", httpPort)
 
+	// Проверяем, что порты разные
+	if tcpPort == httpPort {
+		log.Fatalf("❌ Port conflict: TCP port %s cannot be the same as HTTP port", tcpPort)
+	}
+
 	host := "0.0.0.0"
 	if environment == "development" {
 		host = "localhost"
@@ -85,7 +101,7 @@ func main() {
 
 	serverConfig := server.ServerConfig{
 		Host: host,
-		Port: tcpPort, // Используем TCP порт из переменной
+		Port: tcpPort,
 	}
 
 	storageConfig := server.StorageConfig{
@@ -106,8 +122,7 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	// Запускаем основной TCP сервер - передаем оба аргумента
-	// Второй аргумент (httpPort) вероятно используется для внутреннего HTTP сервера
+	// Запускаем основной TCP сервер
 	go func() {
 		if err := messengerServer.Start(ctx, httpPort); err != nil {
 			log.Printf("❌ TCP server error: %v", err)
